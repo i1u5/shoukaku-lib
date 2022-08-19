@@ -1,6 +1,6 @@
 import { Node } from './Node';
 import { NodeOption } from '../Shoukaku';
-import Petitio, { HTTPMethod } from 'petitio';
+import { Dispatcher, request as Undici } from 'undici';
 
 export type LoadType = 'TRACK_LOADED' | 'PLAYLIST_LOADED' | 'SEARCH_RESULT' | 'NO_MATCHES' | 'LOAD_FAILED';
 
@@ -9,7 +9,7 @@ interface FetchOptions {
     options: {
         headers?: Record<string, string>;
         params?: Record<string, string>;
-        method?: HTTPMethod;
+        method?: Dispatcher.HttpMethod;
         body?: Record<string, unknown>;
         [key: string]: unknown;
     };
@@ -142,7 +142,7 @@ export class Rest {
         const options = {
             endpoint: '/routeplanner/free/address',
             options: {
-                method: 'POST' as HTTPMethod,
+                method: 'POST' as Dispatcher.HttpMethod,
                 headers: { 'Content-Type': 'application/json' },
                 body: { address }
             }
@@ -154,10 +154,10 @@ export class Rest {
     /**
      * Make a request to Lavalink
      * @param fetchOptions.endpoint Lavalink endpoint
-     * @param fetchOptions.options Options passed to petitio
+     * @param fetchOptions.options Options passed to Undici
      * @internal
      */
-    private async fetch<T = unknown>(fetchOptions: FetchOptions) {
+     private async fetch<T = unknown>(fetchOptions: FetchOptions) {
         const { endpoint, options } = fetchOptions;
         let headers = {
             'Authorization': this.auth,
@@ -169,19 +169,18 @@ export class Rest {
         const url = new URL(`${this.url}${endpoint}`);
         if (options.params) url.search = new URLSearchParams(options.params).toString();
 
-        const request = await Petitio(url.toString())
-            .method(options.method?.toUpperCase() as HTTPMethod || 'GET')
-            .header(headers)
-            .body(options.body ?? {})
-            .timeout(this.node.manager.options.restTimeout || 15000)
-            .send();
+        const request = await Undici(url.toString(), { 
+            method: options.method?.toUpperCase() as Dispatcher.HttpMethod || 'GET',
+            headers: headers,
+            body: JSON.stringify(options.body) || null,
+            bodyTimeout: this.node.manager.options.restTimeout || 15000 });
 
         if (request.statusCode && (request.statusCode >= 400))
             throw new Error(`Rest request failed with response code: ${request.statusCode}`);
 
-        const body = request.body.toString('utf8');
-        if (!body?.length) return null;
+        const body = await request.body.json();
+        if (!Object.keys(body).length) return null;
 
-        return JSON.parse(body) as T;
+        return body as T;
     }
 }
